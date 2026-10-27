@@ -42,36 +42,38 @@
         <div>
           <h2 class="text-sm font-semibold text-white">1. Remote Cloud Connection (Profile <code class="text-indigo-400">94584d</code>)</h2>
           <p class="text-xs text-gray-400">
-            Paste your API Key from <a href="https://my.nextdns.io/account" target="_blank" class="text-indigo-400 underline">my.nextdns.io/account</a> once. It saves permanently in your browser so switches never revert.
+            Paste your Google Bridge URL (ending in <code class="text-indigo-400">/exec</code>) and your NextDNS API Key once.
           </p>
         </div>
-        <span id="apiStatus" class="text-xs font-semibold text-amber-400">● API Key Needed for Remote Kill-Switch</span>
+        <span id="apiStatus" class="text-xs font-semibold text-amber-400">● Setup Needed</span>
       </div>
 
-      <div class="grid grid-cols-1 sm:grid-cols-4 gap-2.5">
-        <input id="profileIdInput" type="text" value="94584d" placeholder="Profile ID (e.g. 94584d)"
-          class="px-3 py-2 rounded-lg bg-gray-950 border border-gray-700 text-xs text-white font-mono" />
-        <input id="apiKeyInput" type="password" placeholder="Paste NextDNS API Key here..."
-          class="sm:col-span-2 px-3 py-2 rounded-lg bg-gray-950 border border-gray-700 text-xs text-white font-mono" />
-        <button onclick="saveCredentialsAndSync()" id="connectBtn"
-          class="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-xs font-semibold text-white transition">
-          Save & Connect Cloud
-        </button>
+      <div class="space-y-2.5">
+        <input id="bridgeUrlInput" type="url" placeholder="Paste Google Apps Script Web App URL (https://script.google.com/macros/s/.../exec)"
+          class="w-full px-3 py-2 rounded-lg bg-gray-950 border border-gray-700 text-xs text-white font-mono" />
+
+        <div class="grid grid-cols-1 sm:grid-cols-4 gap-2.5">
+          <input id="profileIdInput" type="text" value="94584d" placeholder="Profile ID (94584d)"
+            class="px-3 py-2 rounded-lg bg-gray-950 border border-gray-700 text-xs text-white font-mono" />
+          <input id="apiKeyInput" type="password" placeholder="Paste NextDNS API Key here..."
+            class="sm:col-span-2 px-3 py-2 rounded-lg bg-gray-950 border border-gray-700 text-xs text-white font-mono" />
+          <button onclick="saveCredentialsAndSync()" id="connectBtn"
+            class="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-xs font-semibold text-white transition">
+            Save & Connect Cloud
+          </button>
+        </div>
       </div>
 
-      <!-- Live Diagnostic Line (Shows exact proxy & HTTP status) -->
       <div id="diagBox" class="text-[11px] font-mono text-gray-400 bg-gray-950/80 px-3 py-1.5 rounded-lg border border-gray-800">
-        Status: Waiting for API connection test...
+        Status: Paste your Google Bridge URL & API Key above, then tap Save & Connect Cloud.
       </div>
     </div>
 
     <!-- 2. Master Internet Kill-Switch & Curfew -->
     <div class="card p-4 space-y-4">
-      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-        <div>
-          <h2 class="text-sm font-semibold text-white">2. Master Phone Internet Switch & 8PM–8AM Curfew</h2>
-          <p class="text-xs text-gray-400">Controls TLD root blocking (<code class="text-rose-400">.com, .net, .org, .co, .ke</code>) so the entire phone cuts off cleanly.</p>
-        </div>
+      <div>
+        <h2 class="text-sm font-semibold text-white">2. Master Phone Internet Switch & 8PM–8AM Curfew</h2>
+        <p class="text-xs text-gray-400">Controls TLD root blocking (<code class="text-rose-400">.com, .net, .org, .co, .ke</code>) so the entire phone cuts off cleanly.</p>
       </div>
 
       <div class="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
@@ -129,7 +131,6 @@
         </div>
       </div>
 
-      <!-- Add Device Box -->
       <div id="addBox" class="hidden p-3 rounded-lg bg-gray-950 border border-gray-800 grid grid-cols-1 sm:grid-cols-4 gap-2">
         <input id="addName" placeholder="Device Name (e.g. Target Phone)" class="px-2.5 py-1.5 rounded bg-gray-900 border border-gray-700 text-xs text-white" />
         <input id="addIp" placeholder="IP (192.168.100.14)" class="px-2.5 py-1.5 rounded bg-gray-900 border border-gray-700 text-xs text-white" />
@@ -143,20 +144,11 @@
   </main>
 
   <script>
-    const STORE_KEY = 'netlock_cloud_v4';
-    // Note: '.io' is intentionally excluded so my.nextdns.io, api.nextdns.io, and github.io never lock themselves out
+    const STORE_KEY = 'netlock_cloud_v5';
     const BLOCK_TLDS = ['com', 'net', 'org', 'app', 'dev', 'co', 'ke', 'xyz', 'info', 'tv', 'me'];
 
-    // Multi-Proxy Failover List (automatically bypasses corsproxy.io 403 restriction on github.io)
-    const CORS_PROXIES = [
-      { name: 'Corsfix Relay', buildUrl: (u) => `https://proxy.corsfix.com/?${u}` },
-      { name: 'CF Worker Relay', buildUrl: (u) => `https://test.cors.workers.dev/?${encodeURIComponent(u)}` },
-      { name: 'X2U CORS Relay', buildUrl: (u) => `https://cors.x2u.in/${u}` },
-      { name: 'CORS.lol Relay', buildUrl: (u) => `https://api.cors.lol/?url=${encodeURIComponent(u)}` },
-      { name: 'CorsProxy.io', buildUrl: (u) => `https://corsproxy.io/?${encodeURIComponent(u)}` }
-    ];
-
     const defaultState = {
+      bridgeUrl: '',
       profileId: '94584d',
       apiKey: '',
       masterMode: 'schedule',
@@ -204,70 +196,48 @@
       return start > end ? (mins >= start || mins < end) : (mins >= start && mins < end);
     }
 
-    // Automatically tries each CORS relay in sequence until one succeeds
+    // Sends a CORS-Simple POST request (text/plain) to your personal Google Apps Script Bridge
     async function nextDnsRequest(endpoint, method = 'GET', bodyObj = null) {
+      const bridgeUrl = (state.bridgeUrl || '').trim();
       const cleanKey = (state.apiKey || '').replace(/\s+/g, '');
       const cleanProfile = (state.profileId || '94584d').replace(/\s+/g, '');
-      if (!cleanKey) throw new Error('Missing API Key');
 
-      const targetUrl = `https://api.nextdns.io/profiles/${cleanProfile}${endpoint}`;
-      let lastError = 'All relays timed out';
-
-      for (const proxy of CORS_PROXIES) {
-        const proxiedUrl = proxy.buildUrl(targetUrl);
-        const ctrl = new AbortController();
-        const timer = setTimeout(() => ctrl.abort(), 6000);
-
-        try {
-          setDiag(`Trying ${proxy.name} (${method} ${endpoint})...`);
-          const headers = { 'X-Api-Key': cleanKey };
-          if (bodyObj !== null) headers['Content-Type'] = 'application/json';
-
-          const opts = {
-            method,
-            headers,
-            signal: ctrl.signal
-          };
-          if (bodyObj !== null) opts.body = JSON.stringify(bodyObj);
-
-          const res = await fetch(proxiedUrl, opts);
-          clearTimeout(timer);
-
-          if (res.status === 401 || res.status === 403) {
-            // Check if 403 came from the proxy itself or NextDNS
-            const txt = await res.text().catch(() => '');
-            if (txt.toLowerCase().includes('cors') || txt.toLowerCase().includes('origin') || res.status === 403) {
-              lastError = `${proxy.name} rejected origin (HTTP ${res.status})`;
-              continue; // Try next proxy
-            }
-            throw new Error(`Invalid NextDNS API Key (HTTP ${res.status})`);
-          }
-
-          if (!res.ok) {
-            lastError = `${proxy.name} returned HTTP ${res.status}`;
-            continue;
-          }
-
-          setDiag(`Connected via ${proxy.name} (HTTP ${res.status} OK)`);
-          if (method === 'GET') {
-            return await res.json();
-          }
-          return true;
-        } catch (err) {
-          clearTimeout(timer);
-          if (err.message.includes('Invalid NextDNS API Key')) throw err;
-          lastError = `${proxy.name}: ${err.message}`;
-        }
+      if (!bridgeUrl.startsWith('https://script.google.com/')) {
+        throw new Error('Paste your Google Apps Script URL ending in /exec');
+      }
+      if (!cleanKey) {
+        throw new Error('Paste your NextDNS API Key');
       }
 
-      throw new Error(lastError);
+      setDiag(`Calling Google Bridge (${method} ${endpoint})...`);
+
+      const res = await fetch(bridgeUrl, {
+        method: 'POST',
+        redirect: 'follow',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({
+          profileId: cleanProfile,
+          apiKey: cleanKey,
+          endpoint,
+          method,
+          body: bodyObj
+        })
+      });
+
+      const result = await res.json();
+      if (!result.ok) {
+        throw new Error(result.error || `NextDNS returned HTTP ${result.status}`);
+      }
+
+      setDiag(`Connected via Google Bridge (NextDNS HTTP ${result.status} OK)`);
+      return result.data;
     }
 
     async function pushCloudKillSwitch(blockInternet) {
       const apiBadge = document.getElementById('apiStatus');
-      if (!state.apiKey) {
+      if (!state.bridgeUrl || !state.apiKey) {
         apiBadge.className = 'text-xs font-semibold text-amber-400';
-        apiBadge.textContent = '● Local Mode (Add API Key above for remote cloud block)';
+        apiBadge.textContent = '● Enter Google Bridge URL & API Key';
         return;
       }
       try {
@@ -279,7 +249,7 @@
         apiBadge.textContent = `● Cloud Synced (${blockInternet ? 'Internet Shut Down' : 'Internet Allowed'})`;
       } catch (e) {
         apiBadge.className = 'text-xs font-semibold text-rose-400';
-        apiBadge.textContent = '● Cloud Sync Error: ' + e.message;
+        apiBadge.textContent = '● Sync Error: ' + e.message;
         setDiag('Failed -> ' + e.message);
       }
     }
@@ -290,10 +260,9 @@
       btn.disabled = true;
       state.subnet = document.getElementById('subnetInput').value.trim().replace(/\.$/, '');
 
-      // 1. Pull active devices from NextDNS Analytics API if API key is present
-      if (state.apiKey) {
+      if (state.bridgeUrl && state.apiKey) {
         try {
-          const data = await nextDnsRequest('/analytics/devices');
+          const data = await nextDnsRequest('/analytics/devices', 'GET');
           if (data && Array.isArray(data.data)) {
             data.data.forEach(d => {
               const name = d.name || d.model || 'Phone on NextDNS';
@@ -315,7 +284,6 @@
         } catch (_) {}
       }
 
-      // 2. Probe local Wi-Fi subnet (.1 to .15)
       for (let i = 1; i <= 15; i++) {
         const ip = `${state.subnet}.${i}`;
         const start = performance.now();
@@ -364,6 +332,7 @@
     }
 
     function saveCredentialsAndSync() {
+      state.bridgeUrl = document.getElementById('bridgeUrlInput').value.trim();
       state.profileId = document.getElementById('profileIdInput').value.replace(/\s+/g, '') || '94584d';
       state.apiKey = document.getElementById('apiKeyInput').value.replace(/\s+/g, '');
       saveState();
@@ -400,6 +369,7 @@
     }
 
     function renderUI() {
+      document.getElementById('bridgeUrlInput').value = state.bridgeUrl || '';
       document.getElementById('profileIdInput').value = state.profileId;
       document.getElementById('apiKeyInput').value = state.apiKey;
       document.getElementById('curfewStart').value = state.curfewStart;
@@ -463,9 +433,8 @@
       document.getElementById('clockDisplay').textContent = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) + ' EAT';
     }, 1000);
 
-    // Check curfew transitions every 30 seconds while open
     setInterval(() => {
-      if (state.apiKey && state.masterMode === 'schedule') {
+      if (state.bridgeUrl && state.apiKey && state.masterMode === 'schedule') {
         pushCloudKillSwitch(isCurfewWindowNow());
       }
     }, 30000);
