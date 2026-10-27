@@ -36,7 +36,7 @@
 
   <main class="max-w-4xl mx-auto px-4 pt-5 space-y-5">
 
-    <!-- Cloud API Connection Card -->
+    <!-- 1. Cloud API Connection Card -->
     <div class="card p-4 space-y-3 border-indigo-500/30">
       <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
         <div>
@@ -53,19 +53,24 @@
           class="px-3 py-2 rounded-lg bg-gray-950 border border-gray-700 text-xs text-white font-mono" />
         <input id="apiKeyInput" type="password" placeholder="Paste NextDNS API Key here..."
           class="sm:col-span-2 px-3 py-2 rounded-lg bg-gray-950 border border-gray-700 text-xs text-white font-mono" />
-        <button onclick="saveCredentialsAndSync()"
+        <button onclick="saveCredentialsAndSync()" id="connectBtn"
           class="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-xs font-semibold text-white transition">
           Save & Connect Cloud
         </button>
       </div>
+
+      <!-- Live Diagnostic Line (Shows exact proxy & HTTP status) -->
+      <div id="diagBox" class="text-[11px] font-mono text-gray-400 bg-gray-950/80 px-3 py-1.5 rounded-lg border border-gray-800">
+        Status: Waiting for API connection test...
+      </div>
     </div>
 
-    <!-- Master Internet Kill-Switch & Curfew -->
+    <!-- 2. Master Internet Kill-Switch & Curfew -->
     <div class="card p-4 space-y-4">
       <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
         <div>
           <h2 class="text-sm font-semibold text-white">2. Master Phone Internet Switch & 8PM–8AM Curfew</h2>
-          <p class="text-xs text-gray-400">Controls TLD root blocking (<code class="text-rose-400">.com, .net, .org, .io, .ke</code>) so the entire phone cuts off cleanly.</p>
+          <p class="text-xs text-gray-400">Controls TLD root blocking (<code class="text-rose-400">.com, .net, .org, .co, .ke</code>) so the entire phone cuts off cleanly.</p>
         </div>
       </div>
 
@@ -103,7 +108,7 @@
       </div>
     </div>
 
-    <!-- Connected Devices Section -->
+    <!-- 3. Connected Devices Section -->
     <div class="card p-4 space-y-4">
       <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
@@ -138,8 +143,18 @@
   </main>
 
   <script>
-    const STORE_KEY = 'netlock_cloud_v3';
-    const BLOCK_TLDS = ['com', 'net', 'org', 'io', 'app', 'dev', 'co', 'ke', 'xyz', 'info'];
+    const STORE_KEY = 'netlock_cloud_v4';
+    // Note: '.io' is intentionally excluded so my.nextdns.io, api.nextdns.io, and github.io never lock themselves out
+    const BLOCK_TLDS = ['com', 'net', 'org', 'app', 'dev', 'co', 'ke', 'xyz', 'info', 'tv', 'me'];
+
+    // Multi-Proxy Failover List (automatically bypasses corsproxy.io 403 restriction on github.io)
+    const CORS_PROXIES = [
+      { name: 'Corsfix Relay', buildUrl: (u) => `https://proxy.corsfix.com/?${u}` },
+      { name: 'CF Worker Relay', buildUrl: (u) => `https://test.cors.workers.dev/?${encodeURIComponent(u)}` },
+      { name: 'X2U CORS Relay', buildUrl: (u) => `https://cors.x2u.in/${u}` },
+      { name: 'CORS.lol Relay', buildUrl: (u) => `https://api.cors.lol/?url=${encodeURIComponent(u)}` },
+      { name: 'CorsProxy.io', buildUrl: (u) => `https://corsproxy.io/?${encodeURIComponent(u)}` }
+    ];
 
     const defaultState = {
       profileId: '94584d',
@@ -168,6 +183,11 @@
       renderUI();
     }
 
+    function setDiag(msg) {
+      const box = document.getElementById('diagBox');
+      if (box) box.textContent = `Status: ${msg}`;
+    }
+
     function isRandomMac(mac) {
       if (!mac || mac.length < 2 || mac === 'CLOUD-DNS') return false;
       return ['2', '6', 'A', 'E'].includes(mac.trim().toUpperCase()[1]);
@@ -184,22 +204,63 @@
       return start > end ? (mins >= start || mins < end) : (mins >= start && mins < end);
     }
 
-    // Calls NextDNS API through a CORS proxy so static hosting (Netlify / GitHub Pages) works from any browser
+    // Automatically tries each CORS relay in sequence until one succeeds
     async function nextDnsRequest(endpoint, method = 'GET', bodyObj = null) {
-      if (!state.apiKey) return null;
-      const targetUrl = `https://api.nextdns.io/profiles/${state.profileId}${endpoint}`;
-      const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(targetUrl)}`;
-      const opts = {
-        method,
-        headers: {
-          'X-Api-Key': state.apiKey,
-          'Content-Type': 'application/json'
+      const cleanKey = (state.apiKey || '').replace(/\s+/g, '');
+      const cleanProfile = (state.profileId || '94584d').replace(/\s+/g, '');
+      if (!cleanKey) throw new Error('Missing API Key');
+
+      const targetUrl = `https://api.nextdns.io/profiles/${cleanProfile}${endpoint}`;
+      let lastError = 'All relays timed out';
+
+      for (const proxy of CORS_PROXIES) {
+        const proxiedUrl = proxy.buildUrl(targetUrl);
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), 6000);
+
+        try {
+          setDiag(`Trying ${proxy.name} (${method} ${endpoint})...`);
+          const headers = { 'X-Api-Key': cleanKey };
+          if (bodyObj !== null) headers['Content-Type'] = 'application/json';
+
+          const opts = {
+            method,
+            headers,
+            signal: ctrl.signal
+          };
+          if (bodyObj !== null) opts.body = JSON.stringify(bodyObj);
+
+          const res = await fetch(proxiedUrl, opts);
+          clearTimeout(timer);
+
+          if (res.status === 401 || res.status === 403) {
+            // Check if 403 came from the proxy itself or NextDNS
+            const txt = await res.text().catch(() => '');
+            if (txt.toLowerCase().includes('cors') || txt.toLowerCase().includes('origin') || res.status === 403) {
+              lastError = `${proxy.name} rejected origin (HTTP ${res.status})`;
+              continue; // Try next proxy
+            }
+            throw new Error(`Invalid NextDNS API Key (HTTP ${res.status})`);
+          }
+
+          if (!res.ok) {
+            lastError = `${proxy.name} returned HTTP ${res.status}`;
+            continue;
+          }
+
+          setDiag(`Connected via ${proxy.name} (HTTP ${res.status} OK)`);
+          if (method === 'GET') {
+            return await res.json();
+          }
+          return true;
+        } catch (err) {
+          clearTimeout(timer);
+          if (err.message.includes('Invalid NextDNS API Key')) throw err;
+          lastError = `${proxy.name}: ${err.message}`;
         }
-      };
-      if (bodyObj !== null) opts.body = JSON.stringify(bodyObj);
-      const res = await fetch(proxyUrl, opts);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      return method === 'GET' ? await res.json() : true;
+      }
+
+      throw new Error(lastError);
     }
 
     async function pushCloudKillSwitch(blockInternet) {
@@ -218,7 +279,8 @@
         apiBadge.textContent = `● Cloud Synced (${blockInternet ? 'Internet Shut Down' : 'Internet Allowed'})`;
       } catch (e) {
         apiBadge.className = 'text-xs font-semibold text-rose-400';
-        apiBadge.textContent = '● Cloud Sync Error (Check API Key or disable .io block)';
+        apiBadge.textContent = '● Cloud Sync Error: ' + e.message;
+        setDiag('Failed -> ' + e.message);
       }
     }
 
@@ -253,19 +315,19 @@
         } catch (_) {}
       }
 
-      // 2. Probe local Wi-Fi subnet (.1 to .20)
-      for (let i = 1; i <= 20; i++) {
+      // 2. Probe local Wi-Fi subnet (.1 to .15)
+      for (let i = 1; i <= 15; i++) {
         const ip = `${state.subnet}.${i}`;
         const start = performance.now();
         const ctrl = new AbortController();
-        const t = setTimeout(() => ctrl.abort(), 350);
+        const t = setTimeout(() => ctrl.abort(), 300);
         try {
           await fetch(`http://${ip}:80/favicon.ico?_=${Date.now()}`, { mode: 'no-cors', signal: ctrl.signal });
           clearTimeout(t);
           registerLocalHost(ip, i);
         } catch (_) {
           clearTimeout(t);
-          if (performance.now() - start < 290) registerLocalHost(ip, i);
+          if (performance.now() - start < 250) registerLocalHost(ip, i);
         }
       }
 
@@ -302,8 +364,8 @@
     }
 
     function saveCredentialsAndSync() {
-      state.profileId = document.getElementById('profileIdInput').value.trim() || '94584d';
-      state.apiKey = document.getElementById('apiKeyInput').value.trim();
+      state.profileId = document.getElementById('profileIdInput').value.replace(/\s+/g, '') || '94584d';
+      state.apiKey = document.getElementById('apiKeyInput').value.replace(/\s+/g, '');
       saveState();
       pushCloudKillSwitch(isCurfewWindowNow());
       runFullDeviceDiscovery();
@@ -400,6 +462,13 @@
     setInterval(() => {
       document.getElementById('clockDisplay').textContent = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) + ' EAT';
     }, 1000);
+
+    // Check curfew transitions every 30 seconds while open
+    setInterval(() => {
+      if (state.apiKey && state.masterMode === 'schedule') {
+        pushCloudKillSwitch(isCurfewWindowNow());
+      }
+    }, 30000);
 
     renderUI();
   </script>
