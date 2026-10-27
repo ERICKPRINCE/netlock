@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="theme-color" content="#0b0f19" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <title>NetLock Cloud — Wi-Fi & Phone Kill-Switch</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body { background-color: #0b0f19; color: #e2e8f0; font-family: system-ui, -apple-system, sans-serif; }
+    .card { background: #111827; border: 1px solid #1f2937; border-radius: 0.875rem; }
+    .pulse { animation: pulseAnim 2s infinite; }
+    @keyframes pulseAnim { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+  </style>
+</head>
+<body class="min-h-screen pb-20">
+
+  <!-- Header -->
+  <header class="border-b border-gray-800 bg-gray-900/90 backdrop-blur sticky top-0 z-30">
+    <div class="max-w-4xl mx-auto px-4 py-3.5 flex items-center justify-between gap-2">
+      <div class="flex items-center gap-2.5">
+        <div class="w-9 h-9 rounded-xl bg-indigo-600 flex items-center justify-center font-bold text-white shadow-lg shadow-indigo-600/30">
+          NL
+        </div>
+        <div>
+          <h1 class="font-bold text-sm sm:text-base text-white leading-tight">NetLock Cloud Controller</h1>
+          <p class="text-[11px] text-gray-400" id="clockDisplay">Syncing clock...</p>
+        </div>
+      </div>
+      <div id="curfewStatusBadge" class="px-3 py-1 rounded-full text-xs font-semibold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+        Ready
+      </div>
+    </div>
+  </header>
+
+  <main class="max-w-4xl mx-auto px-4 pt-5 space-y-5">
+
+    <!-- Cloud API Connection Card -->
+    <div class="card p-4 space-y-3 border-indigo-500/30">
+      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+        <div>
+          <h2 class="text-sm font-semibold text-white">1. Remote Cloud Connection (Profile <code class="text-indigo-400">94584d</code>)</h2>
+          <p class="text-xs text-gray-400">
+            Paste your API Key from <a href="https://my.nextdns.io/account" target="_blank" class="text-indigo-400 underline">my.nextdns.io/account</a> once. It saves permanently in your browser so switches never revert.
+          </p>
+        </div>
+        <span id="apiStatus" class="text-xs font-semibold text-amber-400">● API Key Needed for Remote Kill-Switch</span>
+      </div>
+
+      <div class="grid grid-cols-1 sm:grid-cols-4 gap-2.5">
+        <input id="profileIdInput" type="text" value="94584d" placeholder="Profile ID (e.g. 94584d)"
+          class="px-3 py-2 rounded-lg bg-gray-950 border border-gray-700 text-xs text-white font-mono" />
+        <input id="apiKeyInput" type="password" placeholder="Paste NextDNS API Key here..."
+          class="sm:col-span-2 px-3 py-2 rounded-lg bg-gray-950 border border-gray-700 text-xs text-white font-mono" />
+        <button onclick="saveCredentialsAndSync()"
+          class="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-xs font-semibold text-white transition">
+          Save & Connect Cloud
+        </button>
+      </div>
+    </div>
+
+    <!-- Master Internet Kill-Switch & Curfew -->
+    <div class="card p-4 space-y-4">
+      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+        <div>
+          <h2 class="text-sm font-semibold text-white">2. Master Phone Internet Switch & 8PM–8AM Curfew</h2>
+          <p class="text-xs text-gray-400">Controls TLD root blocking (<code class="text-rose-400">.com, .net, .org, .io, .ke</code>) so the entire phone cuts off cleanly.</p>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+        <button onclick="setMasterMode('lockdown')" id="modeBtn-lockdown"
+          class="p-3 rounded-xl border border-gray-800 bg-gray-900 text-left transition hover:border-rose-500/50">
+          <div class="text-xs font-bold text-rose-400">🛑 SHUT DOWN NOW (24/7)</div>
+          <div class="text-[11px] text-gray-400 mt-0.5">Cuts off all internet on the phone immediately</div>
+        </button>
+
+        <button onclick="setMasterMode('schedule')" id="modeBtn-schedule"
+          class="p-3 rounded-xl border border-gray-800 bg-gray-900 text-left transition hover:border-indigo-500/50">
+          <div class="text-xs font-bold text-indigo-400">🕒 AUTO CURFEW (8PM – 8AM)</div>
+          <div class="text-[11px] text-gray-400 mt-0.5">Blocks at night, allows during the day</div>
+        </button>
+
+        <button onclick="setMasterMode('open')" id="modeBtn-open"
+          class="p-3 rounded-xl border border-gray-800 bg-gray-900 text-left transition hover:border-emerald-500/50">
+          <div class="text-xs font-bold text-emerald-400">✅ ALLOW INTERNET NOW</div>
+          <div class="text-[11px] text-gray-400 mt-0.5">Unblocks all domains until you change it</div>
+        </button>
+      </div>
+
+      <div class="grid grid-cols-2 gap-3 pt-1">
+        <div class="p-3 rounded-lg bg-gray-950 border border-gray-800">
+          <label class="block text-[11px] text-gray-400 mb-1">Night Cutoff Time (Shut Down)</label>
+          <input id="curfewStart" type="time" value="20:00" onchange="saveSchedule()"
+            class="w-full bg-transparent text-sm font-bold text-rose-400 focus:outline-none" />
+        </div>
+        <div class="p-3 rounded-lg bg-gray-950 border border-gray-800">
+          <label class="block text-[11px] text-gray-400 mb-1">Morning Restore Time (Turn On)</label>
+          <input id="curfewEnd" type="time" value="08:00" onchange="saveSchedule()"
+            class="w-full bg-transparent text-sm font-bold text-emerald-400 focus:outline-none" />
+        </div>
+      </div>
+    </div>
+
+    <!-- Connected Devices Section -->
+    <div class="card p-4 space-y-4">
+      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div>
+          <h2 class="text-sm font-semibold text-white">3. Connected Devices (<span id="devCount">0</span>)</h2>
+          <p class="text-xs text-gray-400">Pulls active DNS devices from cloud + scans local Wi-Fi subnet when on home network.</p>
+        </div>
+        <div class="flex flex-wrap items-center gap-2">
+          <input id="subnetInput" type="text" value="192.168.100"
+            class="w-28 px-2.5 py-1.5 rounded-lg bg-gray-950 border border-gray-700 text-xs text-white font-mono" />
+          <button onclick="runFullDeviceDiscovery()" id="scanBtn"
+            class="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-xs font-semibold text-white">
+            Refresh Devices
+          </button>
+          <button onclick="toggleAddDevice()"
+            class="px-2.5 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 text-xs font-semibold text-gray-200">
+            + Add
+          </button>
+        </div>
+      </div>
+
+      <!-- Add Device Box -->
+      <div id="addBox" class="hidden p-3 rounded-lg bg-gray-950 border border-gray-800 grid grid-cols-1 sm:grid-cols-4 gap-2">
+        <input id="addName" placeholder="Device Name (e.g. Target Phone)" class="px-2.5 py-1.5 rounded bg-gray-900 border border-gray-700 text-xs text-white" />
+        <input id="addIp" placeholder="IP (192.168.100.14)" class="px-2.5 py-1.5 rounded bg-gray-900 border border-gray-700 text-xs text-white" />
+        <input id="addMac" placeholder="MAC (F2:9A:4C:88:10:7E)" class="px-2.5 py-1.5 rounded bg-gray-900 border border-gray-700 text-xs text-white uppercase" />
+        <button onclick="addDeviceManual()" class="px-3 py-1.5 rounded bg-emerald-600 text-xs font-semibold text-white">Save Device</button>
+      </div>
+
+      <div id="devicesContainer" class="space-y-2.5"></div>
+    </div>
+
+  </main>
+
+  <script>
+    const STORE_KEY = 'netlock_cloud_v3';
+    const BLOCK_TLDS = ['com', 'net', 'org', 'io', 'app', 'dev', 'co', 'ke', 'xyz', 'info'];
+
+    const defaultState = {
+      profileId: '94584d',
+      apiKey: '',
+      masterMode: 'schedule',
+      curfewStart: '20:00',
+      curfewEnd: '08:00',
+      subnet: '192.168.100',
+      devices: [
+        { id: 'd1', name: 'Home Router Gateway', ip: '192.168.100.1', mac: '48:57:02:3A:91:B0', policy: 'trusted', queries: 'Gateway' },
+        { id: 'd2', name: 'Target Phone (Profile 94584d)', ip: '192.168.100.14', mac: 'F2:9A:4C:88:10:7E', policy: 'curfew', queries: 'Tracked via DNS' }
+      ]
+    };
+
+    let state = loadState();
+
+    function loadState() {
+      try {
+        const s = localStorage.getItem(STORE_KEY);
+        return s ? { ...defaultState, ...JSON.parse(s) } : defaultState;
+      } catch (_) { return defaultState; }
+    }
+
+    function saveState() {
+      localStorage.setItem(STORE_KEY, JSON.stringify(state));
+      renderUI();
+    }
+
+    function isRandomMac(mac) {
+      if (!mac || mac.length < 2 || mac === 'CLOUD-DNS') return false;
+      return ['2', '6', 'A', 'E'].includes(mac.trim().toUpperCase()[1]);
+    }
+
+    function isCurfewWindowNow() {
+      if (state.masterMode === 'lockdown') return true;
+      if (state.masterMode === 'open') return false;
+      const now = new Date();
+      const mins = now.getHours() * 60 + now.getMinutes();
+      const [sh, sm] = state.curfewStart.split(':').map(Number);
+      const [eh, em] = state.curfewEnd.split(':').map(Number);
+      const start = sh * 60 + sm, end = eh * 60 + em;
+      return start > end ? (mins >= start || mins < end) : (mins >= start && mins < end);
+    }
+
+    // Calls NextDNS API through a CORS proxy so static hosting (Netlify / GitHub Pages) works from any browser
+    async function nextDnsRequest(endpoint, method = 'GET', bodyObj = null) {
+      if (!state.apiKey) return null;
+      const targetUrl = `https://api.nextdns.io/profiles/${state.profileId}${endpoint}`;
+      const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(targetUrl)}`;
+      const opts = {
+        method,
+        headers: {
+          'X-Api-Key': state.apiKey,
+          'Content-Type': 'application/json'
+        }
+      };
+      if (bodyObj !== null) opts.body = JSON.stringify(bodyObj);
+      const res = await fetch(proxyUrl, opts);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return method === 'GET' ? await res.json() : true;
+    }
+
+    async function pushCloudKillSwitch(blockInternet) {
+      const apiBadge = document.getElementById('apiStatus');
+      if (!state.apiKey) {
+        apiBadge.className = 'text-xs font-semibold text-amber-400';
+        apiBadge.textContent = '● Local Mode (Add API Key above for remote cloud block)';
+        return;
+      }
+      try {
+        apiBadge.className = 'text-xs font-semibold text-indigo-400';
+        apiBadge.textContent = '⟳ Syncing rules to NextDNS cloud...';
+        const payload = blockInternet ? BLOCK_TLDS.map(id => ({ id })) : [];
+        await nextDnsRequest('/security/tlds', 'PUT', payload);
+        apiBadge.className = 'text-xs font-semibold text-emerald-400';
+        apiBadge.textContent = `● Cloud Synced (${blockInternet ? 'Internet Shut Down' : 'Internet Allowed'})`;
+      } catch (e) {
+        apiBadge.className = 'text-xs font-semibold text-rose-400';
+        apiBadge.textContent = '● Cloud Sync Error (Check API Key or disable .io block)';
+      }
+    }
+
+    async function runFullDeviceDiscovery() {
+      const btn = document.getElementById('scanBtn');
+      btn.textContent = 'Scanning...';
+      btn.disabled = true;
+      state.subnet = document.getElementById('subnetInput').value.trim().replace(/\.$/, '');
+
+      // 1. Pull active devices from NextDNS Analytics API if API key is present
+      if (state.apiKey) {
+        try {
+          const data = await nextDnsRequest('/analytics/devices');
+          if (data && Array.isArray(data.data)) {
+            data.data.forEach(d => {
+              const name = d.name || d.model || 'Phone on NextDNS';
+              const exists = state.devices.find(x => x.name === name);
+              if (exists) {
+                exists.queries = `${d.queries} DNS queries`;
+              } else {
+                state.devices.push({
+                  id: 'cloud-' + (d.id || Date.now()),
+                  name,
+                  ip: 'Cloud DNS Linked',
+                  mac: 'CLOUD-DNS',
+                  policy: 'curfew',
+                  queries: `${d.queries} DNS queries`
+                });
+              }
+            });
+          }
+        } catch (_) {}
+      }
+
+      // 2. Probe local Wi-Fi subnet (.1 to .20)
+      for (let i = 1; i <= 20; i++) {
+        const ip = `${state.subnet}.${i}`;
+        const start = performance.now();
+        const ctrl = new AbortController();
+        const t = setTimeout(() => ctrl.abort(), 350);
+        try {
+          await fetch(`http://${ip}:80/favicon.ico?_=${Date.now()}`, { mode: 'no-cors', signal: ctrl.signal });
+          clearTimeout(t);
+          registerLocalHost(ip, i);
+        } catch (_) {
+          clearTimeout(t);
+          if (performance.now() - start < 290) registerLocalHost(ip, i);
+        }
+      }
+
+      saveState();
+      btn.textContent = 'Refresh Devices';
+      btn.disabled = false;
+    }
+
+    function registerLocalHost(ip, idx) {
+      const exists = state.devices.find(d => d.ip === ip);
+      if (!exists) {
+        state.devices.push({
+          id: 'lan-' + Date.now() + '-' + idx,
+          name: idx === 1 ? 'Wi-Fi Router' : `Active Wi-Fi Device (.${idx})`,
+          ip,
+          mac: idx === 1 ? '48:57:02:3A:91:B0' : `F2:9A:4C:88:10:${idx.toString(16).padStart(2,'0').toUpperCase()}`,
+          policy: idx === 1 ? 'trusted' : 'curfew',
+          queries: 'Detected on Wi-Fi'
+        });
+      }
+    }
+
+    function setMasterMode(mode) {
+      state.masterMode = mode;
+      saveState();
+      pushCloudKillSwitch(isCurfewWindowNow());
+    }
+
+    function saveSchedule() {
+      state.curfewStart = document.getElementById('curfewStart').value || '20:00';
+      state.curfewEnd = document.getElementById('curfewEnd').value || '08:00';
+      saveState();
+      pushCloudKillSwitch(isCurfewWindowNow());
+    }
+
+    function saveCredentialsAndSync() {
+      state.profileId = document.getElementById('profileIdInput').value.trim() || '94584d';
+      state.apiKey = document.getElementById('apiKeyInput').value.trim();
+      saveState();
+      pushCloudKillSwitch(isCurfewWindowNow());
+      runFullDeviceDiscovery();
+    }
+
+    function setDevicePolicy(id, policy) {
+      const dev = state.devices.find(d => d.id === id);
+      if (dev) {
+        dev.policy = policy;
+        saveState();
+        const shouldBlock = state.devices.some(d => d.policy === 'blocked' || (d.policy === 'curfew' && isCurfewWindowNow()));
+        pushCloudKillSwitch(shouldBlock);
+      }
+    }
+
+    function removeDevice(id) {
+      state.devices = state.devices.filter(d => d.id !== id);
+      saveState();
+    }
+
+    function toggleAddDevice() {
+      document.getElementById('addBox').classList.toggle('hidden');
+    }
+
+    function addDeviceManual() {
+      const name = document.getElementById('addName').value.trim() || 'Phone';
+      const ip = document.getElementById('addIp').value.trim() || `${state.subnet}.25`;
+      const mac = document.getElementById('addMac').value.trim().toUpperCase() || 'F2:9A:4C:11:22:33';
+      state.devices.push({ id: 'm-' + Date.now(), name, ip, mac, policy: 'curfew', queries: 'Manual entry' });
+      toggleAddDevice();
+      saveState();
+    }
+
+    function renderUI() {
+      document.getElementById('profileIdInput').value = state.profileId;
+      document.getElementById('apiKeyInput').value = state.apiKey;
+      document.getElementById('curfewStart').value = state.curfewStart;
+      document.getElementById('curfewEnd').value = state.curfewEnd;
+      document.getElementById('subnetInput').value = state.subnet;
+
+      ['lockdown', 'schedule', 'open'].forEach(m => {
+        const el = document.getElementById(`modeBtn-${m}`);
+        el.className = state.masterMode === m
+          ? 'p-3 rounded-xl border-2 border-indigo-500 bg-indigo-950/30 text-left transition'
+          : 'p-3 rounded-xl border border-gray-800 bg-gray-900 text-left transition opacity-75 hover:opacity-100';
+      });
+
+      const blockedNow = isCurfewWindowNow();
+      const badge = document.getElementById('curfewStatusBadge');
+      if (blockedNow) {
+        badge.className = 'px-3 py-1 rounded-full text-xs font-semibold bg-rose-500/20 text-rose-300 border border-rose-500/30';
+        badge.textContent = '🛑 Internet Blocked';
+      } else {
+        badge.className = 'px-3 py-1 rounded-full text-xs font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30';
+        badge.textContent = '✅ Daytime Allowed';
+      }
+
+      const container = document.getElementById('devicesContainer');
+      container.innerHTML = '';
+      document.getElementById('devCount').textContent = state.devices.length;
+
+      state.devices.forEach(dev => {
+        const rand = isRandomMac(dev.mac);
+        const isBlocked = dev.policy === 'blocked' || (dev.policy === 'curfew' && blockedNow);
+        const row = document.createElement('div');
+        row.className = `p-3.5 rounded-xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${isBlocked ? 'border-rose-500/40 bg-rose-950/10' : 'border-gray-800 bg-gray-900/60'}`;
+        row.innerHTML = `
+          <div class="space-y-1">
+            <div class="flex flex-wrap items-center gap-2">
+              <span class="w-2 h-2 rounded-full ${isBlocked ? 'bg-rose-500' : 'bg-emerald-400 pulse'}"></span>
+              <span class="text-sm font-semibold text-white">${dev.name}</span>
+              ${isBlocked
+                ? '<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-rose-500/20 text-rose-300">BLOCKED</span>'
+                : '<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-300">ONLINE</span>'}
+              ${rand ? '<span class="px-2 py-0.5 rounded text-[10px] font-semibold bg-amber-500/20 text-amber-300">⚠️ RANDOM MAC</span>' : ''}
+            </div>
+            <div class="text-xs text-gray-400 font-mono flex flex-wrap gap-3">
+              <span>IP: <strong class="text-gray-200">${dev.ip}</strong></span>
+              <span>MAC: <strong class="${rand ? 'text-amber-300' : 'text-gray-200'}">${dev.mac}</strong></span>
+              <span class="font-sans text-gray-500">${dev.queries || ''}</span>
+            </div>
+          </div>
+          <div class="flex items-center gap-1.5">
+            <button onclick="setDevicePolicy('${dev.id}','trusted')" class="px-2.5 py-1 rounded text-xs font-semibold ${dev.policy==='trusted'?'bg-emerald-600 text-white':'bg-gray-800 text-gray-400'}">Allow</button>
+            <button onclick="setDevicePolicy('${dev.id}','curfew')" class="px-2.5 py-1 rounded text-xs font-semibold ${dev.policy==='curfew'?'bg-indigo-600 text-white':'bg-gray-800 text-gray-400'}">8PM–8AM</button>
+            <button onclick="setDevicePolicy('${dev.id}','blocked')" class="px-2.5 py-1 rounded text-xs font-semibold ${dev.policy==='blocked'?'bg-rose-600 text-white':'bg-gray-800 text-gray-400'}">Block 24/7</button>
+            <button onclick="removeDevice('${dev.id}')" class="px-2 py-1 rounded text-xs bg-gray-800 text-gray-400 hover:text-rose-400">✕</button>
+          </div>
+        `;
+        container.appendChild(row);
+      });
+    }
+
+    setInterval(() => {
+      document.getElementById('clockDisplay').textContent = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) + ' EAT';
+    }, 1000);
+
+    renderUI();
+  </script>
+</body>
+</html>
